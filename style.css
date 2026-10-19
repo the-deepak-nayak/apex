@@ -1,0 +1,322 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+    color-scheme: dark;
+
+    --background: #000000;
+    --foreground: #f0f5f2;
+    --muted: #718078;
+
+    --green: #00ff88;
+    --blue: #006bff;
+    --cyan: #20cfff;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #000;
+}
+
+body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+#experience {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    isolation: isolate;
+    overflow: hidden;
+    background: #000;
+}
+
+#scene-container {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: #000;
+    transition: opacity 1.5s ease;
+}
+
+#scene-container canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.top-bar,
+.bottom-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 5;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    padding: 30px 42px;
+    pointer-events: none;
+}
+
+.top-bar {
+    top: 0;
+}
+
+.bottom-bar {
+    bottom: 0;
+    gap: 20px;
+}
+
+/* APEX BRAND */
+
+.brand {
+    font-size: 33px;
+    font-weight: 700;
+    letter-spacing: -2px;
+    line-height: 1;
+
+    color: #f5fff9;
+
+    text-shadow:
+        0 0 12px rgba(0, 255, 136, 0.12);
+
+    transition: text-shadow 300ms ease;
+}
+
+.brand span {
+    color: var(--green);
+
+    text-shadow:
+        0 0 8px rgba(0, 255, 136, 0.8),
+        0 0 24px rgba(0, 255, 136, 0.3);
+}
+
+.status,
+.eyebrow,
+.instructions,
+.launch-prompt,
+.signal-lost,
+.loading {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+}
+
+.status,
+.instructions {
+    color: var(--muted);
+}
+
+.status {
+    position: relative;
+    padding-left: 14px;
+}
+
+.status::before {
+    content: '';
+
+    position: absolute;
+    left: 0;
+    top: 50%;
+
+    width: 5px;
+    height: 5px;
+
+    background: var(--green);
+    border-radius: 50%;
+
+    box-shadow:
+        0 0 7px rgba(0, 255, 136, 0.9);
+
+    transform: translateY(-50%);
+}
+
+/* CENTER MESSAGE */
+
+.center-message {
+    position: absolute;
+    top: 24%;
+    left: 50%;
+    z-index: 1;
+
+    width: min(90%, 700px);
+
+    text-align: center;
+    pointer-events: none;
+
+    transform: translate(-50%, -50%);
+
+    opacity: 0.30;
+
+    transition:
+        opacity 700ms ease,
+        transform 700ms ease;
+}
+
+.eyebrow {
+    color: #8ba49a;
+}
+
+.center-message h1 {
+    margin: 18px 0 8px;
+
+    font-size: clamp(24px, 3.2vw, 44px);
+    font-weight: 400;
+    letter-spacing: -2px;
+    line-height: 1;
+
+    color: #a2b4ac;
+}
+
+.center-message p {
+    margin: 0;
+
+    color: #60766b;
+    font-size: 10px;
+    letter-spacing: 4px;
+}
+
+/* LAUNCH PROMPT */
+
+.launch-prompt {
+    color: var(--foreground);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+/* SIGNAL LOST */
+
+.signal-lost {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 10;
+
+    opacity: 0;
+    visibility: hidden;
+
+    transform: translate(-50%, -50%);
+
+    transition:
+        opacity 1s ease,
+        visibility 1s ease;
+
+    color: var(--foreground);
+    white-space: nowrap;
+}
+
+.signal-lost.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* LOADING */
+
+.loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 20;
+
+    transform: translate(-50%, -50%);
+
+    color: var(--foreground);
+    white-space: nowrap;
+    background: #000;
+
+    transition: opacity 500ms ease;
+}
+
+.loading.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.loading span {
+    animation: pulse 1s infinite;
+}
+
+/* LAUNCH AND END STATES */
+
+body.launched .center-message {
+    opacity: 0;
+    transform: translate(-50%, -55%);
+}
+
+body.launched .launch-prompt,
+body.launched .instructions {
+    opacity: 0;
+}
+
+body.ended #experience {
+    background: #000;
+}
+
+body.ended #scene-container {
+    opacity: 0;
+}
+
+/* ANIMATIONS */
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 0.45;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+/* MOBILE */
+
+@media (max-width: 600px) {
+    .top-bar,
+    .bottom-bar {
+        padding: 22px;
+    }
+
+    .brand {
+        font-size: 27px;
+        letter-spacing: -1.5px;
+    }
+
+    .status,
+    .eyebrow,
+    .instructions,
+    .launch-prompt {
+        font-size: 8px;
+        letter-spacing: 1px;
+    }
+
+    .center-message h1 {
+        letter-spacing: -2px;
+    }
+
+    .center-message p {
+        font-size: 10px;
+        letter-spacing: 3px;
+    }
+
+    .bottom-bar {
+        align-items: flex-end;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .launch-prompt,
+    .loading span {
+        animation: none;
+    }
+}
