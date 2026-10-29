@@ -22,8 +22,10 @@ const LAUNCH_DURATION = 4.5;
 const LAUNCH_ACCELERATION = 28;
 const LAUNCH_MAX_SPEED = 40;
 
-const ENDING_FADE_DURATION = 1.5;
-const ENDING_BLACK_HOLD = 0.8;
+const INTRO_PROGRESS_DURATION = 5.2;
+const CAMERA_CINEMATIC_DURATION = 1.8;
+const SHRED_DURATION = 2.7;
+const ENDING_FADE_DURATION = 0.85;
 
 // Infinite background settings
 const TECH_CELL_SIZE = 8;
@@ -47,6 +49,12 @@ const centerMessage = document.querySelector('.center-message');
 const launchPrompt = document.querySelector('.launch-prompt');
 const signalLost = document.querySelector('.signal-lost');
 const loadingElement = document.querySelector('.loading');
+const progressPanel = document.getElementById('intro-progress');
+const progressFill = document.getElementById('progress-fill');
+const progressValue = document.getElementById('progress-value');
+const progressLabel = document.getElementById('progress-label');
+const welcomeScreen = document.getElementById('welcome-screen');
+const welcomeTitle = document.getElementById('welcome-title');
 
 // ============================================================
 // SCENE
@@ -335,6 +343,15 @@ let launchStarted = false;
 let launchElapsed = 0;
 let endingElapsed = 0;
 let endingPhase = 'none';
+let introElapsed = 0;
+let shredElapsed = 0;
+let introPhase = 'idle';
+let carParts = [];
+let shardObjects = [];
+let cameraStartPosition = new THREE.Vector3();
+let cameraStartTarget = new THREE.Vector3();
+let cinematicCameraPosition = new THREE.Vector3();
+let cinematicCameraTarget = new THREE.Vector3();
 
 // ============================================================
 // PATH STATE
@@ -843,6 +860,23 @@ loader.load(
 			if (object.isMesh) {
 				object.castShadow = true;
 				object.receiveShadow = true;
+
+				// Clone each material so the cinematic dissolve only affects this car.
+				const sourceMaterials = Array.isArray(object.material)
+					? object.material
+					: [object.material];
+
+				const clonedMaterials = sourceMaterials.map(material => material.clone());
+				object.material = Array.isArray(object.material)
+					? clonedMaterials
+					: clonedMaterials[0];
+
+				carParts.push({
+					mesh: object,
+					materials: clonedMaterials,
+					delay: Math.random() * 0.72,
+					baseOpacities: clonedMaterials.map(material => material.opacity)
+				});
 			}
 		});
 
@@ -888,6 +922,10 @@ loader.load(
 			setTimeout(() => {
 				loadingElement.style.display = 'none';
 			}, 500);
+		}
+
+		if (progressPanel) {
+			progressPanel.classList.add('visible');
 		}
 
 		console.log('APEX: Car loaded.');
@@ -1218,160 +1256,258 @@ function updateCar(deltaTime) {
 }
 
 // ============================================================
-// LAUNCH AND ENDING
+// CINEMATIC INTRO, SHREDDER EFFECT, AND WELCOME REVEAL
 // ============================================================
 
 function startLaunch() {
-	if (
-		!carReady ||
-		!car ||
-		launchStarted ||
-		isFinished
-	) {
+	if (!carReady || !car || launchStarted || isFinished) {
 		return;
 	}
 
 	launchStarted = true;
 	isLaunching = true;
 	launchElapsed = 0;
-
-	normalParticles.visible = false;
-	launchParticles.visible = true;
-	exhaustGroup.visible = true;
+	introElapsed = 0;
+	shredElapsed = 0;
+	introPhase = 'camera';
 
 	launchDirection.copy(movementDirection);
 	launchDirection.y = 0;
-
 	if (launchDirection.lengthSq() < 0.0001) {
 		launchDirection.set(0, 0, -1);
 	}
-
 	launchDirection.normalize();
-
-	trailPoints.length = 0;
-	trailFollowIndex = 0;
-	lastRecordedPoint = null;
-	trailNeedsUpdate = true;
-
-	carSpeed = Math.max(carSpeed, 5);
-
-	if (centerMessage) {
-		centerMessage.style.opacity = '0';
-	}
-
-	if (launchPrompt) {
-		launchPrompt.style.opacity = '0';
-	}
-
-	console.log(
-		'APEX launch:',
-		launchDirection.x.toFixed(3),
-		launchDirection.z.toFixed(3)
-	);
-}
-
-function finishLaunch() {
-	if (isFinished) {
-		return;
-	}
-
-	isFinished = true;
-	isLaunching = false;
 
 	carSpeed = 0;
 	carAcceleration = 0;
-
-	endingElapsed = 0;
-	endingPhase = 'fade';
-
 	normalParticles.visible = false;
 	launchParticles.visible = false;
 	exhaustGroup.visible = false;
-
 	clearVisibleTrail();
 
-	if (signalLost) {
-		signalLost.style.opacity = '0';
-	}
+	cameraStartPosition.copy(camera.position);
+	cameraStartTarget.copy(carPosition);
+	cameraStartTarget.y += 0.3;
 
-	console.log('APEX: SIGNAL LOST. Beginning fade to black.');
+	const sideDirection = new THREE.Vector3(
+		launchDirection.z,
+		0,
+		-launchDirection.x
+	).normalize();
+
+	// A low, close side-on composition: the body of the car becomes the subject.
+	cinematicCameraPosition.copy(carPosition)
+		.addScaledVector(sideDirection, 2.65)
+		.addScaledVector(launchDirection, 0.18);
+	cinematicCameraPosition.y += 0.68;
+
+	cinematicCameraTarget.copy(carPosition);
+	cinematicCameraTarget.y += 0.34;
+
+	if (centerMessage) centerMessage.style.display = 'none';
+	if (launchPrompt) launchPrompt.style.display = 'none';
+	document.body.classList.add('launched');
+
+	if (progressPanel) progressPanel.classList.add('visible');
+	if (progressFill) progressFill.style.width = '0%';
+	if (progressValue) progressValue.textContent = '0%';
+	if (progressLabel) progressLabel.textContent = 'INITIALIZING EXPERIENCE';
+
+	console.log('APEX: Cinematic intro started.');
 }
 
-function updateEnding(deltaTime) {
-	if (!isFinished) {
-		return;
+function createShards() {
+	for (const shard of shardObjects) {
+		scene.remove(shard.mesh);
+		shard.mesh.geometry.dispose();
+		shard.mesh.material.dispose();
+	}
+	shardObjects = [];
+
+	const bounds = new THREE.Box3().setFromObject(car);
+	const size = new THREE.Vector3();
+	const center = new THREE.Vector3();
+	bounds.getSize(size);
+	bounds.getCenter(center);
+
+	const palette = [];
+	for (const part of carParts) {
+		for (const material of part.materials) {
+			if (material.color) palette.push(material.color.clone());
+		}
+	}
+	if (palette.length === 0) palette.push(new THREE.Color(0x9ca9a4));
+
+	const shardCount = 145;
+	for (let i = 0; i < shardCount; i++) {
+		const width = 0.025 + Math.random() * 0.075;
+		const height = 0.018 + Math.random() * 0.06;
+		const depth = 0.02 + Math.random() * 0.09;
+		const geometry = new THREE.BoxGeometry(width, height, depth);
+		const color = palette[Math.floor(Math.random() * palette.length)].clone();
+		const material = new THREE.MeshStandardMaterial({
+			color,
+			emissive: color,
+			emissiveIntensity: 0.12,
+			metalness: 0.55,
+			roughness: 0.35,
+			transparent: true,
+			opacity: 0,
+			depthWrite: false
+		});
+		const mesh = new THREE.Mesh(geometry, material);
+		const start = new THREE.Vector3(
+			bounds.min.x + Math.random() * Math.max(size.x, 0.01),
+			bounds.min.y + Math.random() * Math.max(size.y, 0.01),
+			bounds.min.z + Math.random() * Math.max(size.z, 0.01)
+		);
+		mesh.position.copy(start);
+		mesh.visible = true;
+		scene.add(mesh);
+
+		const outward = start.clone().sub(center);
+		if (outward.lengthSq() < 0.001) outward.set(Math.random() - 0.5, Math.random(), Math.random() - 0.5);
+		outward.normalize();
+		outward.add(new THREE.Vector3(
+			(Math.random() - 0.5) * 1.3,
+			Math.random() * 1.2,
+			(Math.random() - 0.5) * 1.3
+		)).normalize();
+
+		shardObjects.push({
+			mesh,
+			start,
+			velocity: outward.multiplyScalar(0.7 + Math.random() * 2.4),
+			rotation: new THREE.Vector3(
+				(Math.random() - 0.5) * 7,
+				(Math.random() - 0.5) * 7,
+				(Math.random() - 0.5) * 7
+			),
+			delay: Math.random() * 1.15,
+			phase: Math.random() * Math.PI * 2
+		});
+	}
+}
+
+function beginShred() {
+	introPhase = 'shred';
+	shredElapsed = 0;
+	isLaunching = false;
+	if (progressLabel) progressLabel.textContent = 'DISASSEMBLING / 3D OBJECT';
+	createShards();
+	console.log('APEX: Starting mesh-by-mesh disassembly.');
+}
+
+function revealWelcome() {
+	introPhase = 'welcome';
+	car.visible = false;
+	techGroup.visible = false;
+	trailGroup.visible = false;
+	ground.visible = false;
+	normalParticles.visible = false;
+	launchParticles.visible = false;
+	exhaustGroup.visible = false;
+	scene.background = new THREE.Color(0x000000);
+	scene.fog = null;
+	document.body.classList.add('ended');
+
+	if (progressPanel) progressPanel.classList.remove('visible');
+	if (welcomeScreen) welcomeScreen.classList.add('visible');
+	if (welcomeTitle) {
+		welcomeTitle.replaceChildren();
+		const title = 'WELCOME TO THE CREATORS DEN';
+		const letters = Array.from(title);
+		letters.forEach((character, index) => {
+			const span = document.createElement('span');
+			span.className = character === ' ' ? 'welcome-letter space' : 'welcome-letter';
+			span.textContent = character === ' ' ? '\u00a0' : character;
+			welcomeTitle.appendChild(span);
+			window.setTimeout(() => span.classList.add('revealed'), 90 + index * 58);
+		});
 	}
 
-	endingElapsed += deltaTime;
+	introPhase = 'complete';
+	isFinished = true;
+	console.log("APEX: Welcome to the Creator's Den.");
+}
 
-	if (endingPhase === 'fade') {
-		const progress = THREE.MathUtils.clamp(
-			endingElapsed / ENDING_FADE_DURATION,
-			0,
-			1
-		);
+function updateCinematic(deltaTime) {
+	if (introPhase === 'camera' || introPhase === 'progress') {
+		introElapsed += deltaTime;
+		const progress = THREE.MathUtils.clamp(introElapsed / INTRO_PROGRESS_DURATION, 0, 1);
+		const cameraProgress = THREE.MathUtils.clamp(introElapsed / CAMERA_CINEMATIC_DURATION, 0, 1);
+		const easedCamera = cameraProgress * cameraProgress * (3 - 2 * cameraProgress);
 
-		endingOverlay.style.opacity = String(progress);
+		camera.position.lerpVectors(cameraStartPosition, cinematicCameraPosition, easedCamera);
+		cameraTarget.lerpVectors(cameraStartTarget, cinematicCameraTarget, easedCamera);
+		camera.lookAt(cameraTarget);
+		camera.fov = THREE.MathUtils.lerp(45, 24, easedCamera);
+		camera.updateProjectionMatrix();
+
+		if (progressFill) progressFill.style.width = `${(progress * 100).toFixed(2)}%`;
+		if (progressValue) progressValue.textContent = `${Math.round(progress * 100)}%`;
+		if (progressLabel && introPhase === 'camera') progressLabel.textContent = 'ESTABLISHING CREATOR ACCESS';
+		introPhase = 'progress';
 
 		if (progress >= 1) {
-			endingPhase = 'hold';
-			endingElapsed = 0;
-
-			if (car) {
-				car.visible = false;
-			}
-
-			techGroup.visible = false;
-			trailGroup.visible = false;
-			normalParticles.visible = false;
-			launchParticles.visible = false;
-			exhaustGroup.visible = false;
-
-			if (signalLost) {
-				signalLost.style.opacity = '0';
-				signalLost.style.display = 'none';
-			}
-
-			if (centerMessage) {
-				centerMessage.style.opacity = '0';
-				centerMessage.style.display = 'none';
-			}
-
-			if (launchPrompt) {
-				launchPrompt.style.opacity = '0';
-				launchPrompt.style.display = 'none';
-			}
-
-			scene.background = new THREE.Color(0x000000);
-			scene.fog = null;
-			ground.visible = false;
-
-			endingOverlay.style.background = '#000';
+			if (progressFill) progressFill.style.width = '100%';
+			if (progressValue) progressValue.textContent = '100%';
+			beginShred();
 		}
-
 		return;
 	}
 
-	if (
-		endingPhase === 'hold' &&
-		endingElapsed >= ENDING_BLACK_HOLD
-	) {
-		endingPhase = 'complete';
-		console.log('APEX: Blank black ending reached.');
+	if (introPhase === 'shred') {
+		shredElapsed += deltaTime;
+		const overall = THREE.MathUtils.clamp(shredElapsed / SHRED_DURATION, 0, 1);
+
+		for (const part of carParts) {
+			const local = THREE.MathUtils.clamp((shredElapsed - part.delay) / Math.max(0.1, SHRED_DURATION - part.delay * 0.35), 0, 1);
+			const opacityFactor = 1 - local;
+			for (let i = 0; i < part.materials.length; i++) {
+				const material = part.materials[i];
+				material.transparent = true;
+				material.depthWrite = false;
+				material.opacity = part.baseOpacities[i] * opacityFactor;
+				material.needsUpdate = true;
+			}
+		}
+
+		for (const shard of shardObjects) {
+			const local = THREE.MathUtils.clamp((shredElapsed - shard.delay) / Math.max(0.15, SHRED_DURATION - shard.delay), 0, 1);
+			const eased = local * local * (3 - 2 * local);
+			shard.mesh.position.copy(shard.start).addScaledVector(shard.velocity, eased * 2.15);
+			shard.mesh.rotation.x = shard.rotation.x * eased;
+			shard.mesh.rotation.y = shard.rotation.y * eased;
+			shard.mesh.rotation.z = shard.rotation.z * eased;
+			shard.mesh.material.opacity = Math.sin(local * Math.PI) * 0.95;
+			const scale = Math.max(0.001, 1 - eased * 0.88);
+			shard.mesh.scale.setScalar(scale);
+		}
+
+		if (overall >= 1) {
+			car.visible = false;
+			for (const shard of shardObjects) shard.mesh.visible = false;
+			introPhase = 'blackout';
+			endingElapsed = 0;
+			endingOverlay.style.transition = `opacity ${ENDING_FADE_DURATION}s ease`;
+			endingOverlay.style.opacity = '1';
+		}
+		return;
+	}
+
+	if (introPhase === 'blackout') {
+		endingElapsed += deltaTime;
+		if (endingElapsed >= ENDING_FADE_DURATION + 0.08) {
+			revealWelcome();
+		}
 	}
 }
 
 window.addEventListener('keydown', event => {
-	if (event.code !== 'Space') {
-		return;
-	}
-
+	if (event.code !== 'Space') return;
+	if (event.repeat) return;
 	event.preventDefault();
-
-	if (event.repeat) {
-		return;
-	}
-
 	startLaunch();
 });
 
@@ -1446,26 +1582,14 @@ function animate() {
 		0.04
 	);
 
-	if (!isFinished) {
+	if (!launchStarted) {
 		updateCar(deltaTime);
 		updateTechBackground(deltaTime);
-
-		if (isLaunching) {
-			normalParticles.visible = false;
-
-			updateExhaust();
-			updateLaunchParticles(deltaTime);
-		} else {
-			exhaustGroup.visible = false;
-			launchParticles.visible = false;
-
-			updateNormalParticles(deltaTime);
-		}
-
+		updateNormalParticles(deltaTime);
 		updateTrail();
 		updateCamera(deltaTime);
 	} else {
-		updateEnding(deltaTime);
+		updateCinematic(deltaTime);
 	}
 
 	renderer.render(scene, camera);
@@ -1497,6 +1621,13 @@ window.addEventListener('resize', () => {
 
 window.addEventListener('beforeunload', () => {
 	renderer.dispose();
+
+	for (const shard of shardObjects) {
+		shard.mesh.geometry.dispose();
+		shard.mesh.material.dispose();
+	}
+
+	carParts.forEach(part => part.materials.forEach(material => material.dispose()));
 
 	normalParticleGeometry.dispose();
 	normalParticleMaterial.dispose();
