@@ -18,7 +18,7 @@ const MAX_TRAIL_POINTS = 12000;
 const NORMAL_PARTICLE_COUNT = 300;
 const LAUNCH_PARTICLE_COUNT = 450;
 
-const LAUNCH_DURATION = 4.5;
+const LAUNCH_DURATION = INTRO_PROGRESS_DURATION;
 const LAUNCH_ACCELERATION = 28;
 const LAUNCH_MAX_SPEED = 40;
 
@@ -352,6 +352,8 @@ let cameraStartPosition = new THREE.Vector3();
 let cameraStartTarget = new THREE.Vector3();
 let cinematicCameraPosition = new THREE.Vector3();
 let cinematicCameraTarget = new THREE.Vector3();
+const cinematicSideDirection = new THREE.Vector3();
+const cinematicCameraOffset = new THREE.Vector3();
 
 // ============================================================
 // PATH STATE
@@ -1087,9 +1089,7 @@ function updateCar(deltaTime) {
 			launchDirection.z
 		);
 
-		if (launchElapsed >= LAUNCH_DURATION) {
-			finishLaunch();
-		}
+		// The cinematic timeline ends the launch when the progress bar reaches 100%.
 
 		return;
 	}
@@ -1289,18 +1289,19 @@ function startLaunch() {
 	cameraStartTarget.copy(carPosition);
 	cameraStartTarget.y += 0.3;
 
-	const sideDirection = new THREE.Vector3(
+	cinematicSideDirection.set(
 		launchDirection.z,
 		0,
 		-launchDirection.x
 	).normalize();
 
-	// A low, close side-on composition: the body of the car becomes the subject.
-	cinematicCameraPosition.copy(carPosition)
-		.addScaledVector(sideDirection, 2.65)
-		.addScaledVector(launchDirection, 0.18);
-	cinematicCameraPosition.y += 0.68;
+	// The destination is a tight, low side-on tracking shot. These offsets are
+	// reapplied every frame so the camera follows the car as it accelerates.
+	cinematicCameraOffset.copy(cinematicSideDirection).multiplyScalar(2.55);
+	cinematicCameraOffset.addScaledVector(launchDirection, 0.22);
+	cinematicCameraOffset.y = 0.62;
 
+	cinematicCameraPosition.copy(carPosition).add(cinematicCameraOffset);
 	cinematicCameraTarget.copy(carPosition);
 	cinematicCameraTarget.y += 0.34;
 
@@ -1324,37 +1325,36 @@ function createShards() {
 	}
 	shardObjects = [];
 
+	car.updateMatrixWorld(true);
 	const bounds = new THREE.Box3().setFromObject(car);
 	const size = new THREE.Vector3();
 	const center = new THREE.Vector3();
 	bounds.getSize(size);
 	bounds.getCenter(center);
 
-	const palette = [];
-	for (const part of carParts) {
-		for (const material of part.materials) {
-			if (material.color) palette.push(material.color.clone());
-		}
-	}
-	if (palette.length === 0) palette.push(new THREE.Color(0x9ca9a4));
+	// Long, thin metallic strips read more like torn bodywork than little cubes.
+	// Their launch-relative velocity makes them whip backwards as the car speeds away.
+	const metalPalette = [0xd7e0e4, 0x87959b, 0x4b5960, 0xaebbc0, 0x26343b];
+	const shardCount = 125;
 
-	const shardCount = 145;
 	for (let i = 0; i < shardCount; i++) {
-		const width = 0.025 + Math.random() * 0.075;
-		const height = 0.018 + Math.random() * 0.06;
-		const depth = 0.02 + Math.random() * 0.09;
-		const geometry = new THREE.BoxGeometry(width, height, depth);
-		const color = palette[Math.floor(Math.random() * palette.length)].clone();
+		const length = 0.22 + Math.random() * 0.9;
+		const width = 0.018 + Math.random() * 0.055;
+		const thickness = 0.008 + Math.random() * 0.018;
+		const geometry = new THREE.BoxGeometry(length, thickness, width);
+		const color = new THREE.Color(metalPalette[Math.floor(Math.random() * metalPalette.length)]);
 		const material = new THREE.MeshStandardMaterial({
 			color,
-			emissive: color,
-			emissiveIntensity: 0.12,
-			metalness: 0.55,
-			roughness: 0.35,
+			emissive: new THREE.Color(0x07141b),
+			emissiveIntensity: 0.35,
+			metalness: 0.92,
+			roughness: 0.24,
 			transparent: true,
-			opacity: 0,
-			depthWrite: false
+			opacity: 0.98,
+			depthWrite: false,
+			side: THREE.DoubleSide
 		});
+
 		const mesh = new THREE.Mesh(geometry, material);
 		const start = new THREE.Vector3(
 			bounds.min.x + Math.random() * Math.max(size.x, 0.01),
@@ -1362,28 +1362,47 @@ function createShards() {
 			bounds.min.z + Math.random() * Math.max(size.z, 0.01)
 		);
 		mesh.position.copy(start);
-		mesh.visible = true;
+
+		// Keep most strips broadly aligned with the car, with irregular twists.
+		mesh.rotation.set(
+			(Math.random() - 0.5) * 1.6,
+			car.rotation.y + (Math.random() - 0.5) * 1.8,
+			(Math.random() - 0.5) * 1.8
+		);
+		mesh.scale.set(
+			0.65 + Math.random() * 1.2,
+			0.7 + Math.random() * 1.5,
+			0.7 + Math.random() * 1.2
+		);
 		scene.add(mesh);
 
+		const backward = launchDirection.clone().negate();
 		const outward = start.clone().sub(center);
-		if (outward.lengthSq() < 0.001) outward.set(Math.random() - 0.5, Math.random(), Math.random() - 0.5);
+		if (outward.lengthSq() < 0.001) {
+			outward.set(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5);
+		}
 		outward.normalize();
-		outward.add(new THREE.Vector3(
-			(Math.random() - 0.5) * 1.3,
-			Math.random() * 1.2,
-			(Math.random() - 0.5) * 1.3
-		)).normalize();
+
+		const velocity = backward.multiplyScalar(5 + Math.random() * 12);
+		velocity.addScaledVector(outward, 1.5 + Math.random() * 5.5);
+		velocity.add(new THREE.Vector3(
+			(Math.random() - 0.5) * 4.5,
+			0.8 + Math.random() * 6.5,
+			(Math.random() - 0.5) * 4.5
+		));
 
 		shardObjects.push({
 			mesh,
-			start,
-			velocity: outward.multiplyScalar(0.7 + Math.random() * 2.4),
+			baseScale: mesh.scale.clone(),
+			start: start.clone(),
+			velocity,
 			rotation: new THREE.Vector3(
-				(Math.random() - 0.5) * 7,
-				(Math.random() - 0.5) * 7,
-				(Math.random() - 0.5) * 7
+				(Math.random() - 0.5) * 18,
+				(Math.random() - 0.5) * 22,
+				(Math.random() - 0.5) * 18
 			),
-			delay: Math.random() * 1.15,
+			delay: Math.random() * 0.55,
+			lifetime: 1.05 + Math.random() * 1.45,
 			phase: Math.random() * Math.PI * 2
 		});
 	}
@@ -1392,10 +1411,11 @@ function createShards() {
 function beginShred() {
 	introPhase = 'shred';
 	shredElapsed = 0;
-	isLaunching = false;
-	if (progressLabel) progressLabel.textContent = 'DISASSEMBLING / 3D OBJECT';
+	// Keep the car moving during the tear-away so the camera tracks it while
+	// metallic body strips whip backwards through the frame.
+	if (progressLabel) progressLabel.textContent = 'BODYWORK / FRAGMENTING';
 	createShards();
-	console.log('APEX: Starting mesh-by-mesh disassembly.');
+	console.log('APEX: Starting cinematic metal-strip breakup.');
 }
 
 function revealWelcome() {
@@ -1431,22 +1451,52 @@ function revealWelcome() {
 	console.log("APEX: Welcome to the Creator's Den.");
 }
 
+function updateCinematicCamera(deltaTime, easedCamera = 1) {
+	const desiredPosition = carPosition.clone().add(cinematicCameraOffset);
+	const desiredTarget = carPosition.clone();
+	desiredTarget.y += 0.34;
+
+	if (easedCamera < 1) {
+		camera.position.lerpVectors(cameraStartPosition, desiredPosition, easedCamera);
+		cameraTarget.lerpVectors(cameraStartTarget, desiredTarget, easedCamera);
+	} else {
+		// Tight side-on follow: keep the car framed while it accelerates away.
+		const smoothing = 1 - Math.exp(-5.5 * deltaTime);
+		camera.position.lerp(desiredPosition, smoothing);
+		cameraTarget.lerp(desiredTarget, smoothing);
+	}
+
+	camera.fov = THREE.MathUtils.lerp(45, 25, easedCamera);
+	camera.updateProjectionMatrix();
+	camera.lookAt(cameraTarget);
+}
+
 function updateCinematic(deltaTime) {
 	if (introPhase === 'camera' || introPhase === 'progress') {
+		// This was the missing link: keep running the actual launch movement while
+		// the intro/progress animation is active, instead of freezing the car.
+		updateCar(deltaTime);
+		updateTechBackground(deltaTime);
+		updateLaunchParticles(deltaTime);
+		updateExhaust();
+
 		introElapsed += deltaTime;
 		const progress = THREE.MathUtils.clamp(introElapsed / INTRO_PROGRESS_DURATION, 0, 1);
 		const cameraProgress = THREE.MathUtils.clamp(introElapsed / CAMERA_CINEMATIC_DURATION, 0, 1);
 		const easedCamera = cameraProgress * cameraProgress * (3 - 2 * cameraProgress);
 
-		camera.position.lerpVectors(cameraStartPosition, cinematicCameraPosition, easedCamera);
-		cameraTarget.lerpVectors(cameraStartTarget, cinematicCameraTarget, easedCamera);
-		camera.lookAt(cameraTarget);
-		camera.fov = THREE.MathUtils.lerp(45, 24, easedCamera);
-		camera.updateProjectionMatrix();
+		// Update the tracking destination after the car has moved this frame.
+		cinematicCameraPosition.copy(carPosition).add(cinematicCameraOffset);
+		cinematicCameraTarget.copy(carPosition);
+		cinematicCameraTarget.y += 0.34;
+		updateCinematicCamera(deltaTime, easedCamera);
 
 		if (progressFill) progressFill.style.width = `${(progress * 100).toFixed(2)}%`;
 		if (progressValue) progressValue.textContent = `${Math.round(progress * 100)}%`;
-		if (progressLabel && introPhase === 'camera') progressLabel.textContent = 'ESTABLISHING CREATOR ACCESS';
+		if (progressLabel) progressLabel.textContent = progress < 0.35
+			? 'ESTABLISHING CREATOR ACCESS'
+			: 'ACCELERATING / CREATOR ACCESS';
+
 		introPhase = 'progress';
 
 		if (progress >= 1) {
@@ -1458,11 +1508,22 @@ function updateCinematic(deltaTime) {
 	}
 
 	if (introPhase === 'shred') {
+		// Maintain acceleration and camera tracking while the bodywork tears away.
+		updateCar(deltaTime);
+		updateTechBackground(deltaTime);
+		updateLaunchParticles(deltaTime);
+		updateExhaust();
+		updateCinematicCamera(deltaTime, 1);
+
 		shredElapsed += deltaTime;
 		const overall = THREE.MathUtils.clamp(shredElapsed / SHRED_DURATION, 0, 1);
 
 		for (const part of carParts) {
-			const local = THREE.MathUtils.clamp((shredElapsed - part.delay) / Math.max(0.1, SHRED_DURATION - part.delay * 0.35), 0, 1);
+			const local = THREE.MathUtils.clamp(
+				(shredElapsed - part.delay) / Math.max(0.1, SHRED_DURATION - part.delay * 0.35),
+				0,
+				1
+			);
 			const opacityFactor = 1 - local;
 			for (let i = 0; i < part.materials.length; i++) {
 				const material = part.materials[i];
@@ -1474,20 +1535,39 @@ function updateCinematic(deltaTime) {
 		}
 
 		for (const shard of shardObjects) {
-			const local = THREE.MathUtils.clamp((shredElapsed - shard.delay) / Math.max(0.15, SHRED_DURATION - shard.delay), 0, 1);
-			const eased = local * local * (3 - 2 * local);
-			shard.mesh.position.copy(shard.start).addScaledVector(shard.velocity, eased * 2.15);
-			shard.mesh.rotation.x = shard.rotation.x * eased;
-			shard.mesh.rotation.y = shard.rotation.y * eased;
-			shard.mesh.rotation.z = shard.rotation.z * eased;
-			shard.mesh.material.opacity = Math.sin(local * Math.PI) * 0.95;
-			const scale = Math.max(0.001, 1 - eased * 0.88);
-			shard.mesh.scale.setScalar(scale);
+			const activeTime = Math.max(0, shredElapsed - shard.delay);
+			const lifeProgress = THREE.MathUtils.clamp(activeTime / shard.lifetime, 0, 1);
+			if (activeTime <= 0) {
+				shard.mesh.visible = false;
+				continue;
+			}
+
+			shard.mesh.visible = true;
+			shard.mesh.position.copy(shard.start);
+			shard.mesh.position.addScaledVector(shard.velocity, activeTime);
+			shard.mesh.position.y -= 3.2 * activeTime * activeTime;
+			shard.mesh.rotation.x += shard.rotation.x * deltaTime;
+			shard.mesh.rotation.y += shard.rotation.y * deltaTime;
+			shard.mesh.rotation.z += shard.rotation.z * deltaTime;
+
+			// A quick metallic glint at release, then fade as the strip flies behind.
+			const fadeIn = THREE.MathUtils.smoothstep(activeTime, 0, 0.12);
+			const fadeOut = 1 - THREE.MathUtils.smoothstep(lifeProgress, 0.48, 1);
+			shard.mesh.material.opacity = 0.96 * fadeIn * fadeOut;
+			const stretch = 1 + Math.min(activeTime * 0.16, 0.45);
+			shard.mesh.scale.set(
+				shard.baseScale.x * stretch,
+				shard.baseScale.y,
+				shard.baseScale.z
+			);
 		}
 
 		if (overall >= 1) {
+			isLaunching = false;
 			car.visible = false;
 			for (const shard of shardObjects) shard.mesh.visible = false;
+			launchParticles.visible = false;
+			exhaustGroup.visible = false;
 			introPhase = 'blackout';
 			endingElapsed = 0;
 			endingOverlay.style.transition = `opacity ${ENDING_FADE_DURATION}s ease`;
